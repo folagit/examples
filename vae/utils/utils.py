@@ -21,26 +21,123 @@ from io import BytesIO
 import pickle
 from utils.parser import local_args
 from utils.spellcheck import sym_spell
-
-
+import urllib3.request
+import shutil
+from six.moves import urllib
+import gzip
+from symspellpy.symspellpy import SymSpell, Verbosity  # import the module
+import gc
 args = local_args()
 np.random.seed(args.seed)
+
+
+
+def get_pubmedc_spellcheck():
+    global pubmed_dir,pubmedc_url,pubmedc_spell
+    pubmedc_spell = load_pkl(fdir=pubmed_dir, f='pubmedc_spell')
+
+
+    if pubmedc_spell is None:
+        pubmedc_spell = SymSpell(initial_capacity, max_edit_distance_dictionary, prefix_length)
+
+        fs = requests.get(pubmedc_url).content.decode('utf-8').split()
+        fs = [x for x in fs if '1-grams' in x]
+        for i,f in enumerate(fs):
+            r=requests.get(f)
+            # vocab = defaultdict(int)
+            with gzip.open(BytesIO(r.content),'rb') as zfile:
+                while zfile.readline():
+                    tmp = zfile.readline().decode('utf-8').split('\t')
+                    if tmp and len(tmp) == 4:
+                        word,freq=tmp[0].lower(),int(tmp[2])
+                        if '=' in word:
+                            continue
+                        if len(word) <3 or len(word) > 45:
+                            continue
+                        if freq < 2:
+                            continue
+                        if len(word) < 3:
+                            continue
+                        pubmedc_spell.create_dictionary_entry(word, freq)
+                        print('added \'{}\''.format(word))
+                    else:
+                        print('skipped None word')
+                        # if len(tmp) >= 2 and tmp not in glookup:
+                        #     print('processing \'{}\''.format(tmp))
+                        #     cur.append(tmp)
+                print('added {}th file: '.format(i,f))
+        # save_pkl(fdir=pubmed_dir,f='pubmedc_spell',obj=pubmedc_spell)
+
+    return pubmedc_spell
+
+def get_pubmed_spellcheck():
+    global pubmed_dir,pubmed_url,pubmed_spell
+    pubmed_spell = load_pkl(fdir=pubmed_dir, f='pubmed_spell')
+
+
+    if pubmed_spell is None:
+        pubmed_spell = SymSpell(initial_capacity, max_edit_distance_dictionary, prefix_length)
+
+        fs = requests.get(pubmed_url).content.decode('utf-8').split()
+        fs = [x for x in fs if '1-grams' in x]
+        for i,f in enumerate(fs):
+            r=requests.get(f)
+            # vocab = defaultdict(int)
+            with gzip.open(BytesIO(r.content),'rb') as zfile:
+                while zfile.readline():
+                    tmp = zfile.readline().decode('utf-8').split('\t')
+                    if tmp and len(tmp) == 4:
+                        word,freq=tmp[0].lower(),int(tmp[2])
+                        if '=' in word:
+                            continue
+                        if len(word) <3 or len(word) > 45:
+                            continue
+                        if freq < 2:
+                            continue
+                        if len(word) < 3:
+                            continue
+                        pubmed_spell.create_dictionary_entry(word, freq)
+                        print('added \'{}\''.format(word))
+                    else:
+                        print('skipped None word')
+                        # if len(tmp) >= 2 and tmp not in glookup:
+                        #     print('processing \'{}\''.format(tmp))
+                        #     cur.append(tmp)
+                print('added {}th file: '.format(i,f))
+        # save_pkl(fdir=pubmed_dir,f='pubmedc_spell',obj=pubmed_spell)
+
+    return pubmed_spell
+
+
+def get_pubmed_vocab():
+    global pubmed_dir
+    with open(os.path.join(pubmed_dir,'pubmed_vocab.pkl'),'rb') as f:
+        pubmed_vocab = pickle.load(f)
+    return pubmed_vocab
+
+
 
 def init():
 
     global glove_dir, glove_file, glove_pkl, glove_url
-    global data_dir, did_dir
+    global data_dir, did_dir, pubmed_dir,pubmed_url,pubmedc_url
     global wv_dim, vocabulary_size, misc_symbols
     global unknown_num_token, unknown_word_token, new_line_token
     global charmap
+    global initial_capacity, prefix_length, max_edit_distance_dictionary
 
     glove_dir = os.path.join(os.environ['HOME'], 'data', 'glove')
     glove_file = 'glove.840B.300d.txt'
     glove_pkl = 'glove_embeddings.pkl'
     glove_url = 'http://nlp.stanford.edu/data/glove.840B.300d.zip'
+    pubmed_dir = os.path.join(os.environ['HOME'],'data','pubmed')
+    pubmed_url = 'http://evexdb.org/pmresources/ngrams/PubMed/filelist'
+    pubmedc_url = 'http://evexdb.org/pmresources/ngrams/PMC/filelist'
     data_dir = 'data'
     did_dir =  os.path.join(os.environ['HOME'],'data','deidentified')
-
+    initial_capacity = int(1e5)
+    prefix_length = 7
+    max_edit_distance_dictionary = 2
     wv_dim = 300
     vocabulary_size = 100000
     misc_symbols = {'(': 'open_parentheses_symbol',
@@ -172,54 +269,63 @@ def _preprocess_data():
         words and their frequencies in the corpus
     '''
     global did_dir,sym_spell
-    X, y = (None,None)
 
-
-    X,y = load_pkl(fdir=did_dir, f='Xy.pkl')
+    Xy = load_pkl(fdir=did_dir, f='Xy.pkl')
     vocabulary = load_pkl(fdir=did_dir,f='vocabulary.pkl')
 
-    if X is None:
+    if Xy is None:
         print('Preprocessing data...')
         min_substring = 2
         data = get_reports_dataframe()
         X, y, rid = data['report'].values, data['label'].values, data.index.values
         X = [[token for line in report for token in line.lower().split() if len(token) <= 26] for report in _preprocess_text(X)]
         xdict, xfreq = list(zip(*nltk.FreqDist(itertools.chain(*X)).most_common()))
-        vocabulary = pd.Series(data=xfreq, index=list(xdict))
+        vocabulary = dict(zip(np.asarray(xdict),xfreq))
         X = np.asarray(X)
         y = np.asarray(y)
 
-        if vocabulary is None:
-            print('Preprocessing vocabulary...')
+        index2word = dict(zip(np.arange(len(xdict)),np.asarray(xdict)))
+        word2index = dict(zip(np.asarray(xdict),np.arange(len(xdict))))
 
-            xdict, xfreq = list(zip(*nltk.FreqDist(itertools.chain(*X)).most_common()))
-            vocabulary = pd.Series(data=np.arange(len(list(xdict))), index=list(xdict))
+        glookup = get_glove_embeddings().index.values
+        gc.collect()
+        pubmed_vocab = get_pubmed_vocab()
 
-
-        gembs = get_glove_embeddings()
-        lookup = gembs.index.values
-        lookup = ([word for word in lookup if len(word) >= min_substring])
-        lookup = pd.Series(data=np.ones((len(lookup),)), index=lookup)
+        # lookup = ([word for word in lookup if len(word) >= min_substring])
+        # glookup = pd.Series(data=np.ones((len(glookup),)), index=glookup)
 
         Xnew = []
         for x in X:
-            doc = []
-            for xi in x:
-                # if word not in lookup:
-                if word not in lookup:
-                    suggs = sym_spell.lookup_compound(word,1)
-                if type(word) is list:
-                    line.extend(word)
+            xnew = []
+            for word in x:
+                #if word not in lookup, spell check for candidates with max edit distance=1
+                #search through list to find first match in vocabulary
+                #if not in vocabulary, use first match
+                if word.isnumeric():
+                    xnew.append(word)
+                elif word not in glookup and word not in pubmed_vocab:
+                    suggs = sym_spell.lookup_compound(word,2)
+                    for i, sugg in enumerate(suggs):
+                        print("corrected \'{}\' to \'{}\'".format(word,sugg.term))
+                    for sugg in suggs:
+                        sugg = sugg.term
+                        if sugg in vocabulary:
+                            vocabulary[sugg]+=1
+                        else:
+                            vocabulary[sugg]=1
+                        xnew.append(sugg)
                 else:
-                    line.append(word)
-                # else:
-                # line.append(word)
-            Xnew.append(line)
+                    xnew.append(word)
+            gc.collect()
+            Xnew.append(xnew)
+
         print('word correction complete')
         # X0 = [[wc.viterbi_segment(word) if word not in lookup else word for word in line] for line in X]
         X = np.array(Xnew)
-        save_pkl(fdir=data_dir,f='Xy',obj=(X,y))
-        save_pkl(fdir=did_dir, f='vocabulary', obj=vocabulary)
+        with open(os.path.join(did_dir,'Xy.pkl'), 'rb') as f:
+            pickle.Pikler(f, -1).dump((X,y))
+        with open(os.path.join(did_dir,'vocabulary.pkl'), 'rb') as f:
+            pickle.Pikler(f, -1).dump(vocabulary)
 
 
 
@@ -289,7 +395,7 @@ def _preprocess_text(texts):
         s = re.sub(r'(p\.?m\.?)', ' pm ', s, flags=re.IGNORECASE)
         s = re.sub(r'(a\.?m\.?)', ' am ', s, flags=re.IGNORECASE)
         s = re.sub(r'(dr\.)', 'dr', s, flags=re.IGNORECASE)
-        re.sub(r'\.{1}', ' ', s)
+        re.sub(r'\.\.+', ' ', s)
         for symbol, token in misc_symbols.items():
             if symbol in '.:' and symbol in s:
                 s = filter_periods(s,symbol=symbol)

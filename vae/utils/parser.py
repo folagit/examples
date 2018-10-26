@@ -109,7 +109,7 @@ def local_args():
                 'best_model': 'model.pth.tar', 'crop': 0.875, 'data_dgx': '',
                 'data_summit': '', 'batch_val': 5,
                 'data_summitdev': '', 'env': 'local',
-                'data_local':'/home/fa6/data/deidentified/',
+                'data_local':'/home/fa6/data/',
                 'epochs': 300, 'evaluate': False, 'factor': 0.1, 'fp16': False, 'gamma': 0.1, 'hvd': True,
                 'lr': 0.0001, 'momentum': 0.9, 'num_classes': 14, 'n_gpus': 4, 'n_nodes': 1, 'n_threads': 4,
                 'no_cuda': False,'cuda':True,'distributed':False,

@@ -8,7 +8,7 @@ def setup(initial_capacity=83000, prefix_length=7, max_edit_distance_dictionary=
 
     dict_path = '/home/fa6/data/symspellpy/frequency_dictionary_en_82_765.txt'
     sym_spell = SymSpell(initial_capacity, max_edit_distance_dictionary,
-                         prefix_length)
+                         prefix_length,count_threshold=30)
 
     term_index = 0  # column of the term in the dictionary text file
     count_index = 1  # column of the term frequency in the dictionary text file
