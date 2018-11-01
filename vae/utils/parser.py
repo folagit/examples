@@ -116,7 +116,7 @@ def local_args():
                 'optimizer': 'Adam', 'parallel': False, 'patience': 5, 'pretrained': False, 'print_freq': 50,
                 'resources': '244','hvd_size':1,'hvd_rank':0,'hvd_local_rank':1,
                 'resume': 'checkpoint.pth.tar', 'seed': 42, 'start_epoch': 0, 'step_size': 30, 'stop_patience': 10,
-                'tag': 'data',
+                'tag': 'data/experiment',
                 'train_list': './chestX-ray14/labels/train_list.txt', 'trial': False, 'weight_decay': 1e-05,
                 'version': 0.4, 'warmup_epochs': 5, 'workers': 0}
         __args['data'] = {'summitdev': __args['data_summitdev'],

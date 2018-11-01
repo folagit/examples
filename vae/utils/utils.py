@@ -33,7 +33,7 @@ np.random.seed(args.seed)
 
 
 def get_pubmedc_spellcheck():
-    global pubmed_dir,pubmedc_url,pubmedc_spell
+    global pubmed_dir,pubmedc_url,pubmedc_spell,did_dir
     pubmedc_spell = load_pkl(fdir=pubmed_dir, f='pubmedc_spell')
 
 
@@ -42,6 +42,10 @@ def get_pubmedc_spellcheck():
 
         fs = requests.get(pubmedc_url).content.decode('utf-8').split()
         fs = [x for x in fs if '1-grams' in x]
+
+        with open(os.path.join(did_dir,'medwords.pkl'),'rb') as f:
+            medwords = pickle.load(f)
+
         for i,f in enumerate(fs):
             r=requests.get(f)
             # vocab = defaultdict(int)
@@ -58,8 +62,9 @@ def get_pubmedc_spellcheck():
                             continue
                         if len(word) < 3:
                             continue
-                        pubmedc_spell.create_dictionary_entry(word, freq)
-                        print('added \'{}\''.format(word))
+                        if word in medwords:
+                            pubmedc_spell.create_dictionary_entry(word, freq)
+                            print('added \'{}\''.format(word))
                     else:
                         print('skipped None word')
                         # if len(tmp) >= 2 and tmp not in glookup:
@@ -80,6 +85,9 @@ def get_pubmed_spellcheck():
 
         fs = requests.get(pubmed_url).content.decode('utf-8').split()
         fs = [x for x in fs if '1-grams' in x]
+
+        with open(os.path.join(args.data,did_dir,'medwords.pkl'),'rb') as f:
+            medwords = pickle.load(f)
         for i,f in enumerate(fs):
             r=requests.get(f)
             # vocab = defaultdict(int)
@@ -96,8 +104,9 @@ def get_pubmed_spellcheck():
                             continue
                         if len(word) < 3:
                             continue
-                        pubmed_spell.create_dictionary_entry(word, freq)
-                        print('added \'{}\''.format(word))
+                        if word in medwords:
+                            pubmed_spell.create_dictionary_entry(word, freq)
+                            print('added \'{}\''.format(word))
                     else:
                         print('skipped None word')
                         # if len(tmp) >= 2 and tmp not in glookup:
@@ -126,15 +135,17 @@ def init():
     global charmap
     global initial_capacity, prefix_length, max_edit_distance_dictionary
 
-    glove_dir = os.path.join(os.environ['HOME'], 'data', 'glove')
+    glove_dir = 'glove'
     glove_file = 'glove.840B.300d.txt'
-    glove_pkl = 'glove_embeddings.pkl'
+    glove_pkl = 'glove_embeddings'
     glove_url = 'http://nlp.stanford.edu/data/glove.840B.300d.zip'
-    pubmed_dir = os.path.join(os.environ['HOME'],'data','pubmed')
+    pubmed_dir = 'pubmed'
     pubmed_url = 'http://evexdb.org/pmresources/ngrams/PubMed/filelist'
     pubmedc_url = 'http://evexdb.org/pmresources/ngrams/PMC/filelist'
     data_dir = 'data'
-    did_dir =  os.path.join(os.environ['HOME'],'data','deidentified')
+    did_dir =  'deidentified'
+    # did_dir =  os.path.join(os.environ['HOME'],'data','deidentified')
+
     initial_capacity = int(1e5)
     prefix_length = 7
     max_edit_distance_dictionary = 2
@@ -148,7 +159,7 @@ def init():
                     '}': 'close_brace_symbol',
                     '<': 'open_angle_symbol',
                     '>': 'close_angle_symbol',
-                    '-': 'hyphen_symbol',
+                    # '-': 'hyphen_symbol',
                     ';': 'semi_colon_symbol',
                     '.': 'period_symbol',
                     '/': 'back_slash_symbol',
@@ -185,10 +196,12 @@ def init():
     charmap = pd.Series(data=np.arange(len(cmap)), index=cmap)
 
 
-def save_pkl(fdir=None, f=None, obj=None):
+def save_pkl(fdir=None, f=None, obj=None, trial=False):
+    global args
     if fdir is None:
         fdir = ''
-    path = os.path.join(args.tag,fdir)
+
+    path = os.path.join(args.tag if trial else args.data,fdir)
     saveas = os.path.join(path, str(f) + '.pkl')
     #print(saveas, '... saving ...')
     if not os.path.exists(path):
@@ -208,11 +221,11 @@ def save_pkl(fdir=None, f=None, obj=None):
         output.close()
 
 
-def load_pkl(fdir=None, f=None):
+def load_pkl(fdir=None, f=None, trial=False):
     if fdir is None:
         fdir = ''
     # saveas = dir + str(f) + '.pkl'
-    path = os.path.join(args.tag,fdir)
+    path = os.path.join(args.tag if trial else args.data,fdir)
     loadas = os.path.join(path, str(f) + '.pkl')
     #print(loadas,'... loading ....')
 
@@ -247,14 +260,14 @@ def _create_report_dataframe():
         print('Wrong file name or file path!')
         return data
 
-    save_pkl(fdir=did_dir, f='report', obj=data)
+    save_pkl(os.path.join(did_dir,'raw'), f='report', obj=data)
     return data
 
 
 def get_reports_dataframe():
     global did_dir
     try:
-        data = pd.read_pickle(path=os.path.join(did_dir,'reports.pkl'))
+        data = load_pkl(fdir=did_dir, f='reports')
         return data
     except FileNotFoundError:
         print('Creating report dataframe...')
@@ -270,15 +283,20 @@ def _preprocess_data():
     '''
     global did_dir,sym_spell
 
-    Xy = load_pkl(fdir=did_dir, f='Xy.pkl')
-    vocabulary = load_pkl(fdir=did_dir,f='vocabulary.pkl')
+    Xy = load_pkl(fdir=os.path.join(did_dir,'raw'), f='Xy')
+    vocabulary = load_pkl(fdir=os.path.join(did_dir,'raw'),f='vocabulary')
+    temp = dict(finaldiagnosis='final diagnosis',
+                clinicaldecision='clinical decision',
+                clinicaldiagnosis='clinical diagnosis',
+                clinica='clinical',
+                fina='final')
 
     if Xy is None:
         print('Preprocessing data...')
         min_substring = 2
         data = get_reports_dataframe()
         X, y, rid = data['report'].values, data['label'].values, data.index.values
-        X = [[token for line in report for token in line.lower().split() if len(token) <= 26] for report in _preprocess_text(X)]
+        X = [[token if token not in temp else temp[token] for line in report for token in line.lower().split() if len(token) <= 45] for report in _preprocess_text(X)]
         xdict, xfreq = list(zip(*nltk.FreqDist(itertools.chain(*X)).most_common()))
         vocabulary = dict(zip(np.asarray(xdict),xfreq))
         X = np.asarray(X)
@@ -286,54 +304,62 @@ def _preprocess_data():
 
         index2word = dict(zip(np.arange(len(xdict)),np.asarray(xdict)))
         word2index = dict(zip(np.asarray(xdict),np.arange(len(xdict))))
-
-        glookup = get_glove_embeddings().index.values
-        gc.collect()
-        pubmed_vocab = get_pubmed_vocab()
-
-        # lookup = ([word for word in lookup if len(word) >= min_substring])
-        # glookup = pd.Series(data=np.ones((len(glookup),)), index=glookup)
-
-        Xnew = []
-        for x in X:
-            xnew = []
-            for word in x:
-                #if word not in lookup, spell check for candidates with max edit distance=1
-                #search through list to find first match in vocabulary
-                #if not in vocabulary, use first match
-                if word.isnumeric():
-                    xnew.append(word)
-                elif word not in glookup and word not in pubmed_vocab:
-                    suggs = sym_spell.lookup_compound(word,2)
-                    for i, sugg in enumerate(suggs):
-                        print("corrected \'{}\' to \'{}\'".format(word,sugg.term))
-                    for sugg in suggs:
-                        sugg = sugg.term
-                        if sugg in vocabulary:
-                            vocabulary[sugg]+=1
-                        else:
-                            vocabulary[sugg]=1
-                        xnew.append(sugg)
-                else:
-                    xnew.append(word)
-            gc.collect()
-            Xnew.append(xnew)
-
-        print('word correction complete')
-        # X0 = [[wc.viterbi_segment(word) if word not in lookup else word for word in line] for line in X]
-        X = np.array(Xnew)
-        with open(os.path.join(did_dir,'Xy.pkl'), 'rb') as f:
-            pickle.Pikler(f, -1).dump((X,y))
-        with open(os.path.join(did_dir,'vocabulary.pkl'), 'rb') as f:
-            pickle.Pikler(f, -1).dump(vocabulary)
+        # with open(os.path.join(did_dir,'medwords.pkl'),'rb') as f:
+        #     medwords = pickle.load(f)
 
 
+        # Xnew = []
+        # for x in X:
+        #     xnew = []
+        #     for word in x:
+        #         #if word not in lookup, spell check for candidates with max edit distance=1
+        #         #search through list to find first match in vocabulary
+        #         #if not in vocabulary, use first match
+        #         if word.isnumeric():
+        #             xnew.append(word)
+        #         elif len(word) < 3:
+        #             xnew.append(word)
+        #         elif word in medwords:
+        #             xnew.append(word)
+        #         elif word not in sym_spell.words:
+        #             suggs = sym_spell.lookup_compound(word,2)
+        #             for i, sugg in enumerate(suggs):
+        #                 print("corrected \'{}\' to \'{}\'".format(word,sugg.term))
+        #             for sugg in suggs:
+        #                 sugg = sugg.term
+        #                 if sugg in vocabulary:
+        #                     vocabulary[sugg]+=1
+        #                 else:
+        #                     vocabulary[sugg]=1
+        #                 xnew.append(sugg)
+        #         else:
+        #             xnew.append(word)
+        #     gc.collect()
+        #     Xnew.append(xnew)
+        #
+        # print('word correction complete')
+        # # X0 = [[wc.viterbi_segment(word) if word not in lookup else word for word in line] for line in X]
+        # X = np.array(Xnew)
+        save_pkl(fdir=os.path.join(did_dir,'raw'),f='Xy',obj=(X,y))
+        save_pkl(fdir=os.path.join(did_dir,'raw'),f='vocabulary',obj=vocabulary)
+        save_pkl(fdir=os.path.join(did_dir,'raw'),f='index2word',obj=index2word)
+        save_pkl(fdir=os.path.join(did_dir,'raw'),f='word2index',obj=word2index)
+        # with open(os.path.join(did_dir,'Xy.pkl'), 'wb') as f:
+        #     pickle.Pickler(f, -1).dump((X,y))
+        # with open(os.path.join(did_dir,'raw','vocabulary.pkl'), 'wb') as f:
+        #     pickle.Pickler(f, -1).dump(vocabulary)
+        # with open(os.path.join(did_dir,'raw','index2word.pkl'), 'wb') as f:
+        #     pickle.Pickler(f, -1).dump(index2word)
+        # with open(os.path.join(did_dir,'raw','word2index.pkl'), 'wb') as f:
+        #     pickle.Pickler(f, -1).dump(word2index)
+    else:
+        X,y = Xy
 
     return (X, y), vocabulary
 
 
 def get_vocabulary():
-    vocabulary = load_pkl(fdir=did_dir,f='vocabulary')
+    vocabulary = load_pkl(os.path.join(did_dir,'raw'),f='vocabulary')
     if vocabulary:
         return vocabulary
     print('preprocessing word2index ....')
@@ -341,19 +367,19 @@ def get_vocabulary():
     return vocabulary
 
 
-def get_index2word():
+def get_wordmap():
     '''
-    Word lookup is a mapping of indices to tokens and vice versa.
+    Wordmap is a mapping of indices to tokens and vice versa.
     Each entity has a double entry allowing user to pull the token by passing an index or pull index by passing a token string
-    :return: index2word series containing index/token and token/index mappings.
+    :return: wordmap series containing index/token and token/index mappings.
     '''
     global did_dir
 
     try:
-        index2word = pd.read_pickle(path=os.path.join(did_dir,'index2word.pkl'))
-        return index2word
+        wordmap = load_pkl(fdir=os.path.join(did_dir,'processed'),f='wordmap')
+        return wordmap
     except FileNotFoundError:
-        print('index2word has not been generated....')
+        print('wordmap has not been generated....')
 
 
 def _preprocess_text(texts):
@@ -395,13 +421,14 @@ def _preprocess_text(texts):
         s = re.sub(r'(p\.?m\.?)', ' pm ', s, flags=re.IGNORECASE)
         s = re.sub(r'(a\.?m\.?)', ' am ', s, flags=re.IGNORECASE)
         s = re.sub(r'(dr\.)', 'dr', s, flags=re.IGNORECASE)
-        re.sub(r'\.\.+', ' ', s)
+        # re.sub(r'\.\.+', ' ', s)
         for symbol, token in misc_symbols.items():
             if symbol in '.:' and symbol in s:
                 s = filter_periods(s,symbol=symbol)
             else:
                 s = s.replace(symbol, ' '+symbol+' ')
-        re.sub(r'\.{2,}', ' ', s)
+        s = re.sub(r'\.{2,}', ' ', s)
+        s = re.sub(r'\x12','',s)
         return ' '.join(s.lower().split())
 
     def unify_clocks(s):
@@ -426,6 +453,8 @@ def _preprocess_text(texts):
         text = [edit_special_characters(line) for line in text]
         # report = ' '.join([word for word in report.split() if len(word) > 1])
         cleaned_texts.append(text)
+
+
     return cleaned_texts
 
 
@@ -434,14 +463,16 @@ def get_glove_embeddings():
 
     :return: a pandas series of Glove pretrained word embeddings
     '''
+    global args
     global glove_dir,glove_file,glove_url,glove_pkl,wv_dim,unknown_word_token,unknown_num_token
+
     try:
-        gembs = pd.read_pickle(path=os.path.join(glove_dir,glove_pkl))
+        gembs = load_pkl(fdir=glove_dir,f=glove_pkl)
         return gembs
     except FileNotFoundError:
-        if not os.path.exists(os.path.join(glove_dir,glove_file)):
+        if not os.path.exists(os.path.join(args.data,glove_dir,glove_file)):
             try:
-                os.makedirs(glove_dir)
+                os.makedirs(os.path.join(args.data,glove_dir))
             except OSError as e:
                 if e.errno != errno.EEXIST:
                     raise
@@ -461,19 +492,19 @@ def get_glove_embeddings():
                 gembs[word] = wemb
 
         gembs = pd.Series(gembs)
-        idx = gembs.index.str.len() <= 26
+        idx = gembs.index.str.len() <= 45
         gembs = gembs[idx]
-        gembs.to_pickle(path=os.path.join(glove_dir,glove_pkl))
+        save_pkl(fdir=glove_dir,f=glove_pkl,obj=gembs)
         return gembs
 
 
 def get_word_embeddings():
     global did_dir
-    try:
-        wembs = pd.read_pickle(path=os.path.join(did_dir,'word_embeddings.pkl'))
+
+    wembs = load_pkl(os.path.join(did_dir,'processed'),'word_embeddings')
+    if wembs is not None:
         return wembs
-    except FileNotFoundError:
-        print('processing pretrained word embeddings...')
+    print('processing pretrained word embeddings...')
 
 
 def get_data_transformers():
@@ -483,16 +514,21 @@ def get_data_transformers():
     :return: wembs (corpus specific word embeddings, vocabulary)
     '''
     # load dictionary
-    try:
-        wembs = get_word_embeddings()
-        index2word = get_index2word()
-        return wembs, index2word
-    except FileNotFoundError:
-        print('Preprocessing pretrained word embeddings...')
 
+    wembs = get_word_embeddings()
+    wordmap = get_wordmap()
+    if wembs is not None and wordmap is not None:
+        return wembs, wordmap
+    print('Preprocessing pretrained word embeddings...')
+    wembs = pd.Series()
     gembs = get_glove_embeddings()
     vocabulary = get_vocabulary()
-    wembs = gembs[vocabulary.index]
+    # wembs = gembs[list(vocabulary.keys())]
+    for key in vocabulary.keys():
+        try:
+            wembs[key] = gembs[key]
+        except KeyError:
+            wembs[key] = float('NaN')
 
     nans = wembs.isnull()  # all words in corpus word map and not in glove dictionary
     numeric = wembs.index.str.isnumeric()  # all numbers in corpus
@@ -501,20 +537,23 @@ def get_data_transformers():
     index[np.logical_and(nans,numeric)] = unknown_num_token  # replace non glove numbers with unknown number token
     wembs.index = index
     wembs = wembs[~wembs.index.duplicated(keep='first')]
-    wembs.loc[unknown_word_token] = np.random.uniform(-.25, .25, wv_dim)  # generate random embedding
-    wembs.loc[unknown_num_token] = np.random.uniform(-.25, .25, wv_dim)  # generate random embedding
+    random_wv = np.random.uniform(-.25, .25, wv_dim)
+    wembs.loc[unknown_word_token] = random_wv.copy()  # generate random embedding
+    wembs.loc[unknown_num_token] = random_wv.copy()  # generate random embedding
 
     # setup new word map
     index = np.arange(len(wembs))
-    index2word = pd.Series(index=wembs.index, data=index)
-    wordmap = index2word.append(pd.Series(index=index, data=wembs.index))
-    wembs.index = wordmap.loc[wembs.index].values
+    index2word = dict(zip(index,wembs.index))
+    word2index = dict(zip(wembs.index,index))
+    wordmap = {**index2word,**word2index}
 
-    save_pkl(fdir=did_dir, f='index2word', obj=index2word)
-    save_pkl(fdir=did_dir, f='wordmap', obj=wordmap)
-    save_pkl(fdir=did_dir, f='word_embeddings', obj=wembs.values)
 
-    return wembs, index2word
+    save_pkl(fdir=os.path.join(did_dir,'processed'), f='index2word', obj=index2word)
+    save_pkl(fdir=os.path.join(did_dir,'processed'), f='index2word', obj=index2word)
+    save_pkl(fdir=os.path.join(did_dir,'processed'), f='wordmap', obj=wordmap)
+    save_pkl(fdir=os.path.join(did_dir,'processed'), f='word_embeddings', obj=wembs.values)
+
+    return wembs, wordmap
 
 
 def get_transformed_data():
@@ -523,28 +562,44 @@ def get_transformed_data():
 
     :return:
     '''
-    try:
-        Xform, y = pd.read_pickle(path=os.path.join(did_dir,'transformed_Xy.pkl'))
-        return Xform, y
-    except FileNotFoundError:
-        print('Transforming data...')
+
+    def isnumeric(value):
+        try:
+            float(value)
+            return True
+        except ValueError:
+            return False
+
+
+    Xformy = load_pkl(fdir=os.path.join(did_dir,'processed'),f='transformed_Xy')
+
+    if Xformy is not None:
+        Xform, y = Xformy
+        return Xform,y
+
+    print('Transforming data...')
     (X, y), _ = _preprocess_data()
-    wembs, index2word = get_data_transformers()
-    # Xform = [[index2word[word] for word in doc] for doc in X]
+    targetmap = load_pkl(fdir=os.path.join(did_dir,'processed'),f='targetmap')
+    if targetmap is None:
+        targetmap = pd.Series(index=np.unique(y),data=np.arange(len(np.unique(y))))
+        save_pkl(fdir=os.path.join(did_dir,'processed'),f='targetmap',obj=targetmap)
+    y = targetmap[y].values
+    wembs, wordmap = get_data_transformers()
+
     Xform = []
     for doc in X:
         docxform = []
         for word in doc:
-            if word in index2word:
-                docxform.append(index2word[word])
-            elif WordCorrection.isnumeric(value=word):
-                docxform.append(index2word.loc[unknown_num_token])
+            if word in wordmap:
+                docxform.append(wordmap[word])
+            elif isnumeric(value=word):
+                docxform.append(wordmap[unknown_num_token])
             else:
-                docxform.append(index2word.loc[unknown_word_token])
+                docxform.append(wordmap[unknown_word_token])
         Xform.append(np.array(docxform))
 
     Xform = np.array(Xform)
-    save_pkl(fdir=did_dir, f='transformed_Xy', obj=(Xform,y))
+    save_pkl(fdir=os.path.join(did_dir,'processed'), f='transformed_Xy', obj=(Xform,y))
     return Xform,y
 
 
@@ -571,6 +626,9 @@ def load_data(n_folds=10):
         y_test.append(y[test_idx])
 
     return (X_train, y_train), (X_test, y_test)
+
+
+
 
 
 
