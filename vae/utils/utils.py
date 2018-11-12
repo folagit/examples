@@ -248,10 +248,10 @@ def _create_report_dataframe():
     try:
         data = pd.read_csv(filepath_or_buffer=os.path.join(did_dir,'fileList.cv'), header=None, names=['filename', 'label'],
                            delimiter=',', index_col='filename')
-        report_path = os.path.join(did_dir,'reports')
+        report_path = os.path.join(args.data,did_dir,'reports')
         reports = []
         for filename in data.index:
-            with open(file=os.path.join(report_path,filename), mode='r') as f:
+            with open(file=os.path.join(report_path,filename), mode='r',encoding="ISO-8859-1") as f:
                 lines = np.array([line.rstrip() for line in f.read().splitlines()])
                 reports.append(lines[~(lines == '')])
         data['report'] = pd.Series(data=reports, index=data.index)
@@ -296,8 +296,11 @@ def _preprocess_data():
         min_substring = 2
         data = get_reports_dataframe()
         X, y, rid = data['report'].values, data['label'].values, data.index.values
-        X = [[token if token not in temp else temp[token] for line in report for token in line.lower().split() if len(token) <= 45] for report in _preprocess_text(X)]
-        xdict, xfreq = list(zip(*nltk.FreqDist(itertools.chain(*X)).most_common()))
+        X = [[[token if token not in temp else temp[token] for token in line.lower().split()] for line in report] for report in _preprocess_text(texts=X)]
+        # X = [[token if token not in temp else temp[token] for line in report for token in line.lower() if
+        #       len(token) <= 45] for report in _preprocess_text(texts=X)]
+
+        xdict, xfreq = list(zip(*nltk.FreqDist(itertools.chain.from_iterable(np.concatenate(X))).most_common()))
         vocabulary = dict(zip(np.asarray(xdict),xfreq))
         X = np.asarray(X)
         y = np.asarray(y)
@@ -344,14 +347,7 @@ def _preprocess_data():
         save_pkl(fdir=os.path.join(did_dir,'raw'),f='vocabulary',obj=vocabulary)
         save_pkl(fdir=os.path.join(did_dir,'raw'),f='index2word',obj=index2word)
         save_pkl(fdir=os.path.join(did_dir,'raw'),f='word2index',obj=word2index)
-        # with open(os.path.join(did_dir,'Xy.pkl'), 'wb') as f:
-        #     pickle.Pickler(f, -1).dump((X,y))
-        # with open(os.path.join(did_dir,'raw','vocabulary.pkl'), 'wb') as f:
-        #     pickle.Pickler(f, -1).dump(vocabulary)
-        # with open(os.path.join(did_dir,'raw','index2word.pkl'), 'wb') as f:
-        #     pickle.Pickler(f, -1).dump(index2word)
-        # with open(os.path.join(did_dir,'raw','word2index.pkl'), 'wb') as f:
-        #     pickle.Pickler(f, -1).dump(word2index)
+
     else:
         X,y = Xy
 
@@ -382,7 +378,7 @@ def get_wordmap():
         print('wordmap has not been generated....')
 
 
-def _preprocess_text(texts):
+def _preprocess_text(texts=None, doc=None):
     '''
     Preprocesses deidentified text
     :param texts: list of deidentified pathology reports (each report is an array of lines within the report)
@@ -448,12 +444,13 @@ def _preprocess_text(texts):
         return s
 
     cleaned_texts = []
-
-    for text in texts:
-        text = [edit_special_characters(line) for line in text]
-        # report = ' '.join([word for word in report.split() if len(word) > 1])
-        cleaned_texts.append(text)
-
+    if texts is not None:
+        for text in texts:
+            text = [edit_special_characters(line) for line in text]
+            # report = ' '.join([word for word in report.split() if len(word) > 1])
+            cleaned_texts.append(text)
+    else:
+        cleaned_texts = [edit_special_characters(line) for line in doc]
 
     return cleaned_texts
 
@@ -589,13 +586,16 @@ def get_transformed_data():
     Xform = []
     for doc in X:
         docxform = []
-        for word in doc:
-            if word in wordmap:
-                docxform.append(wordmap[word])
-            elif isnumeric(value=word):
-                docxform.append(wordmap[unknown_num_token])
-            else:
-                docxform.append(wordmap[unknown_word_token])
+        for line in doc:
+            linexform = []
+            for word in line:
+                if word in wordmap:
+                    linexform.append(wordmap[word])
+                elif isnumeric(value=word):
+                    linexform.append(wordmap[unknown_num_token])
+                else:
+                    linexform.append(wordmap[unknown_word_token])
+            docxform.append(np.asarray(linexform))
         Xform.append(np.array(docxform))
 
     Xform = np.array(Xform)
